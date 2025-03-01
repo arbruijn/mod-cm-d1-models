@@ -7,6 +7,7 @@ using System.Reflection;
 using UnityEngine;
 using Classic;
 using Overload;
+using Debug = Classic.Debug;
 
 namespace Mod_CM_D1_Models
 {

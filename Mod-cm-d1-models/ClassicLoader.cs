@@ -3,15 +3,23 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.IO;
-using System.Diagnostics;
 //using System.Drawing;
 //using System.Drawing.Imaging;
 //using System.Runtime.InteropServices;
 using System.Globalization;
 using System.Threading;
+using UnityEngine;
 
 namespace Classic
 {
+class Debug
+{
+    public static void Log(string msg)
+    {
+        //System.Diagnostics.Debug.WriteLine(msg);
+        UnityEngine.Debug.Log(msg);
+    }
+}
 class Bits
 {
     public static int GetInt32(byte[] a, int ofs)
@@ -92,7 +100,7 @@ class Hog
         while (ofs < size)
         {
             HogItem item = new HogItem(data, ofs);
-            Debug.WriteLine(item.name);
+            //Debug.WriteLine(item.name);
             //Debug.WriteLine(item.dataSize);
             ofs = item.dataOfs + item.dataSize;
             items.Add(item);
@@ -131,21 +139,27 @@ public enum PigFlag
 
 public class PigBitmap
 {
-    public PigBitmap(byte[] data, int ofs)
+    public PigBitmap(byte[] data, int ofs, bool d2)
     {
+        int d2add = d2 ? 1 : 0;
         name = Bits.GetString(data, ofs, 8);
         frame = data[ofs + 8];
         width = data[ofs + 9];
         height = data[ofs + 10];
-        flags = (PigFlag)data[ofs + 11];
-        aveColor = data[ofs + 12];
-        this.ofs = Bits.GetInt32(data, ofs + 13);
-        // size = 17
+        if (d2) {
+            int wh_extra = data[ofs + 11];
+            width += (short)((wh_extra & 0x0f) << 8);
+            height += (short)((wh_extra & 0xf0) << 4);
+        }
+        flags = (PigFlag)data[ofs + d2add + 11];
+        aveColor = data[ofs + d2add + 12];
+        this.ofs = Bits.GetInt32(data, ofs + d2add + 13);
+        // d1 size = 17, d2 size = 18
     }
     public string name;
     public byte frame;
-    public byte width;
-    public byte height;
+    public short width;
+    public short height;
     public PigFlag flags;
     public byte aveColor;
     public int ofs;
@@ -238,40 +252,40 @@ static class Ext
         for (int i = 0, l = v.Length; i < l; i++)
             v[i].Read(r);
     }
-    public static void Read(this TmapInfo[] v, BinaryReader r)
+    public static void Read(this TmapInfo[] v, BinaryReader r, Version version)
     {
         for (int i = 0, l = v.Length; i < l; i++)
-            v[i].Read(r);
+            v[i].Read(r, version);
     }
-    public static void Read(this Vclip[] v, BinaryReader r)
+    public static void Read(this Vclip[] v, BinaryReader r, Version version)
     {
         for (int i = 0, l = v.Length; i < l; i++)
-            v[i].Read(r);
+            v[i].Read(r, version);
     }
-    public static void Read(this Eclip[] v, BinaryReader r)
+    public static void Read(this Eclip[] v, BinaryReader r, Version version)
     {
         for (int i = 0, l = v.Length; i < l; i++)
-            v[i].Read(r);
+            v[i].Read(r, version);
     }
-    public static void Read(this Wclip[] v, BinaryReader r)
+    public static void Read(this Wclip[] v, BinaryReader r, Version version)
     {
         for (int i = 0, l = v.Length; i < l; i++)
-            v[i].Read(r);
+            v[i].Read(r, version);
     }
-    public static void Read(this RobotInfo[] v, BinaryReader r)
+    public static void Read(this RobotInfo[] v, BinaryReader r, Version version)
     {
         for (int i = 0, l = v.Length; i < l; i++)
-            v[i].Read(r);
+            v[i].Read(r, version);
     }
     public static void Read(this JointPos[] v, BinaryReader r)
     {
         for (int i = 0, l = v.Length; i < l; i++)
             v[i].Read(r);
     }
-    public static void Read(this WeaponInfo[] v, BinaryReader r)
+    public static void Read(this WeaponInfo[] v, BinaryReader r, Version version)
     {
         for (int i = 0, l = v.Length; i < l; i++)
-            v[i].Read(r);
+            v[i].Read(r, version);
     }
     public static void Read(this PowerupInfo[] v, BinaryReader r)
     {
@@ -297,14 +311,25 @@ public class Pig
 {
     public Pig(string filename)
     {
+        this.filename = filename;
         data = File.ReadAllBytes(filename);
         int ofs2 = Bits.GetInt32(data, 0);
         int ofs = 4;
-        if (ofs2 < 65536)
-        { // classic pig
-            ofs2 = 0;
+        bool d2 = false;
+        if (ofs2 == 0x47495050) // descent 2 pig
+        {
+            d2 = true;
+            ofs = 8; // skip version
+        }
+        else if (ofs2 >= 65536) // descent reg 1.4+ pig, first int is offset
+        {
+            ofs = ofs2;
+        }
+        else // descent 1 sw / pre 1.4 pig: first int is count
+        {
             ofs = 0;
         }
+        /*
         int lvlTexCount = Bits.GetInt32(data, ofs);
         ofs += 4;
         lvlTexIdx = new int[lvlTexCount];
@@ -314,28 +339,47 @@ public class Pig
             ofs += 2;
         }
         ofs = ofs2;
+        */
         bitmapCount = Bits.GetInt32(data, ofs);
-        Debug.WriteLine("bitmapCount " + bitmapCount);
-        soundCount = Bits.GetInt32(data, ofs + 4);
-        ofs += 8;
-        dataOfs = ofs + bitmapCount * 17 + soundCount * 20;
+        //Debug.WriteLine("bitmapCount " + bitmapCount);
+        Debug.Log("pig bitmapCount " + bitmapCount);
+        if (d2)
+        {
+            soundCount = 0;
+            soundData = null;
+            ofs += 4;
+        }
+        else
+        {
+            soundCount = Bits.GetInt32(data, ofs + 4);
+            soundData = data;
+            ofs += 8;
+        }
+        int bitmapHdrSize = d2 ? 18 : 17;
+        dataOfs = ofs + bitmapCount * bitmapHdrSize + soundCount * 20;
+        if (!d2)
+            soundDataOfs = dataOfs;
         bitmaps = new PigBitmap[bitmapCount];
         bitmapIdxByName = new Dictionary<string, int>();
         for (int i = 0; i < bitmapCount; i++)
         {
-            PigBitmap bitmap = new PigBitmap(data, ofs);
-            ofs += 17;
+            PigBitmap bitmap = new PigBitmap(data, ofs, d2);
+            ofs += bitmapHdrSize;
             bitmaps[i] = bitmap;
+            Debug.Log("bitmap " + i + " ofs " + bitmap.ofs);
             //if ((bitmap.frame & 31) == 0)
             //    bitmapIdxByName.Add(bitmap.name, i);
         }
-        sounds = new PigSound[soundCount];
-        soundIdxByName = new Dictionary<string, int>();
-        for (int i = 0; i < soundCount; i++)
+        if (!d2)
         {
-            PigSound sound = new PigSound(data, ofs);
-            ofs += 20;
-            sounds[i] = sound;
+            sounds = new PigSound[soundCount];
+            soundIdxByName = new Dictionary<string, int>();
+            for (int i = 0; i < soundCount; i++)
+            {
+                PigSound sound = new PigSound(data, ofs);
+                ofs += 20;
+                sounds[i] = sound;
+            }
         }
     }
 
@@ -391,7 +435,10 @@ public class Pig
     public void ReadTableData(out ClassicData v)
     {
         v = new ClassicData();
-        v.Read(new BinaryReader(new MemoryStream(data, 4, Bits.GetInt32(data, 0) - 4)));
+        //v.Read(new BinaryReader(new MemoryStream(data, 4, Bits.GetInt32(data, 0) - 4)), Version.D1);
+
+        byte[] data = File.ReadAllBytes(@"c:\games\descent2\descent2.ham");
+        v.Read(new BinaryReader(new MemoryStream(data, 8, data.Length - 8)), Version.D2);
     }
 
     /*
@@ -400,15 +447,33 @@ public class Pig
     }
     */
 
-    private byte[] data;
-    private readonly int dataOfs;
+    public void ReadD2Sound(string filename)
+    {
+        soundData = File.ReadAllBytes(filename);
+        int ofs = 8;
+        soundCount = Bits.GetInt32(soundData, ofs);
+        ofs += 4;
+        soundDataOfs = ofs + 20 * soundCount;
+        sounds = new PigSound[soundCount];
+        for (int i = 0; i < soundCount; i++)
+        {
+            sounds[i] = new PigSound(soundData, ofs);
+            ofs += 20;
+        }
+    }
+
+    public string filename;
+    public byte[] data;
+    public byte[] soundData;
+    public int dataOfs;
+    public int soundDataOfs;
     public int bitmapCount;
     public int soundCount;
     public PigBitmap[] bitmaps;
     public PigSound[] sounds;
     public Dictionary<string, int> bitmapIdxByName;
     public Dictionary<string, int> soundIdxByName;
-    public int[] lvlTexIdx;
+    //public int[] lvlTexIdx;
 }
 
 /*
@@ -445,6 +510,7 @@ public class Vector2
 
 public struct Fix
 {
+    public static Fix F1_0 = new Fix() { n = 65536 };
     public int n;
     public void Read(BinaryReader r)
     {
@@ -538,20 +604,45 @@ public struct vms_angvec
     }
 }
 
+public enum Version
+{
+    UNKNOWN,
+    D1,
+    D2
+}
+
 public struct TmapInfo
 {
     public string filename;
-    public byte flags;
+    public byte flags, pad0, pad1, pad2;
     public Fix lighting;
     public Fix damage;
     public int eclip_num;
-    public void Read(BinaryReader r)
+    public int destroyed, slide_u, slide_v;
+    public void Read(BinaryReader r, Version version)
     {
-        filename = UTF8Encoding.UTF8.GetString(r.ReadBytes(13));
+        if (version == Version.D1)
+            filename = UTF8Encoding.UTF8.GetString(r.ReadBytes(13));
         r.Read(out flags);
+        if (version != Version.D1)
+        {
+            r.Read(out pad0);
+            r.Read(out pad1);
+            r.Read(out pad2);
+        }
         lighting.Read(r);
         damage.Read(r);
-        r.Read(out eclip_num);
+        if (version == Version.D1)
+        {
+            r.Read(out eclip_num);
+        }
+        else
+        {
+            eclip_num = r.ReadInt16();
+            destroyed = r.ReadInt16();
+            slide_u = r.ReadInt16();
+            slide_v = r.ReadInt16();
+        }
     }
 }
 
@@ -566,17 +657,17 @@ public struct Vclip
     public BitmapIndex[] frames;
     public Fix light_value;
 
-    public void Read(BinaryReader r)
+    public void Read(BinaryReader r, Version version)
     {
-        play_time.n = r.ReadInt32();
+        play_time.Read(r);
         num_frames = r.ReadInt32();
-        frame_time.n = r.ReadInt32();
+        frame_time.Read(r);
         flags = r.ReadInt32();
         sound_num = r.ReadInt16();
         frames = new BitmapIndex[VCLIP_MAX_FRAMES];
         for (int i = 0; i < VCLIP_MAX_FRAMES; i++)
             frames[i].index = r.ReadUInt16();
-        light_value.n = r.ReadInt32();
+        light_value.Read(r);
     }
 }
 
@@ -596,9 +687,9 @@ public struct Eclip
     int sound_num;
     int segnum, sidenum;
 
-    public void Read(BinaryReader r)
+    public void Read(BinaryReader r, Version version)
     {
-        vc.Read(r);
+        vc.Read(r, version);
         time_left.Read(r);
         r.Read(out frame_count);
         r.Read(out changing_wall_texture);
@@ -617,7 +708,8 @@ public struct Eclip
 
 public struct Wclip
 {
-    public const int MAX_CLIP_FRAMES = 20;
+    public const int MAX_CLIP_FRAMES_D1 = 20;
+    public const int MAX_CLIP_FRAMES_D2 = 50;
     public Fix play_time;
     public short num_frames;
     public short[] frames;
@@ -626,21 +718,22 @@ public struct Wclip
     public short flags;
     public string filename;
 
-    public void Read(BinaryReader r)
+    public void Read(BinaryReader r, Version version)
     {
         play_time.Read(r);
         r.Read(out num_frames);
-        frames = new short[MAX_CLIP_FRAMES];
-        for (int fi = 0; fi < MAX_CLIP_FRAMES; fi++)
+        int n = version == Version.D1 ? MAX_CLIP_FRAMES_D1 : MAX_CLIP_FRAMES_D2;
+        frames = new short[n];
+        for (int fi = 0; fi < n; fi++)
             r.Read(out frames[fi]);
         r.Read(out open_sound);
         r.Read(out close_sound);
         r.Read(out flags);
-        byte[] n = r.ReadBytes(14);
+        byte[] namebuf = r.ReadBytes(14);
         int i = 0;
-        while (i < 13 && n[i] != 0)
+        while (i < 13 && namebuf[i] != 0)
             i++;
-        filename = Encoding.UTF8.GetString(n, 0, i);
+        filename = Encoding.UTF8.GetString(namebuf, 0, i);
     }
 }
 
@@ -668,11 +761,12 @@ public struct RobotInfo
     public short exp1_sound_num;
     public short exp2_vclip_num;
     public short exp2_sound_num;
-    public short weapon_type;
+    public int weapon_type, weapon_type2;
     public sbyte contains_id;
     public sbyte contains_count;
     public sbyte contains_prob;
     public sbyte contains_type;
+    public sbyte kamikaze, badass, energy_drain;
     public int score_value;
     public Fix lighting;
     public Fix strength;
@@ -680,6 +774,7 @@ public struct RobotInfo
     public Fix drag;
     public Fix[] field_of_view;
     public Fix[] firing_wait;
+    public Fix[] firing_wait2;
     public Fix[] turn_time;
     public Fix[] fire_power;
     public Fix[] shield;
@@ -693,44 +788,94 @@ public struct RobotInfo
     public byte see_sound;
     public byte attack_sound;
     public byte claw_sound;
+    public sbyte taunt_sound;
+    public sbyte companion, smart_blobs, energy_blobs, thief, pursuit, lightcast, death_roll;
+    public sbyte flags, pad0, pad1, pad2, deathroll_sound, glow, behaviour, aim;
     public JointList[,] anim_states;
     public int sig;
 
-    public void Read(BinaryReader r)
+    public void Read(BinaryReader r, Version version)
     {
         model_num = r.ReadInt32();
-        n_guns = r.ReadInt32();
+        if (version == Version.D1)
+            n_guns = r.ReadInt32();
         (gun_points = new vms_vector[MAX_GUNS]).Read(r);
         (gun_submodels = new byte[MAX_GUNS]).Read(r);
         r.Read(out exp1_vclip_num);
         r.Read(out exp1_sound_num);
         r.Read(out exp2_vclip_num);
         r.Read(out exp2_sound_num);
-        r.Read(out weapon_type);
+        if (version == Version.D1)
+        {
+            weapon_type = r.ReadInt16();
+            weapon_type2 = -1;
+        }
+        else
+        {
+            weapon_type = r.ReadSByte();
+            weapon_type2 = r.ReadSByte();
+            n_guns = r.ReadSByte();
+        }
         r.Read(out contains_id);
         r.Read(out contains_count);
         r.Read(out contains_prob);
         r.Read(out contains_type);
-        r.Read(out score_value);
+        if (version == Version.D1)
+        {
+            score_value = r.ReadInt32();
+        }
+        else
+        {
+            r.Read(out kamikaze);
+            score_value = r.ReadInt16();
+            r.Read(out badass);
+            r.Read(out energy_drain);
+        }
         lighting.Read(r);
         strength.Read(r);
         mass.Read(r);
         drag.Read(r);
         (field_of_view = new Fix[NDL]).Read(r);
         (firing_wait = new Fix[NDL]).Read(r);
+        if (version != Version.D1)
+            (firing_wait2 = new Fix[NDL]).Read(r);
         (turn_time = new Fix[NDL]).Read(r);
-        (fire_power = new Fix[NDL]).Read(r);
-        (shield = new Fix[NDL]).Read(r);
+        if (version == Version.D1)
+        {
+            (fire_power = new Fix[NDL]).Read(r);
+            (shield = new Fix[NDL]).Read(r);
+        }
         (max_speed = new Fix[NDL]).Read(r);
         (circle_distance = new Fix[NDL]).Read(r);
         (rapidfire_count = new sbyte[NDL]).Read(r);
         (evade_speed = new sbyte[NDL]).Read(r);
         r.Read(out cloak_type);
         r.Read(out attack_type);
-        r.Read(out boss_flag);
+        if (version == Version.D1)
+            boss_flag = r.ReadSByte();
         see_sound = r.ReadByte();
         attack_sound = r.ReadByte();
         claw_sound = r.ReadByte();
+        if (version != Version.D1)
+        {
+            r.Read(out taunt_sound);
+            r.Read(out boss_flag);
+            r.Read(out companion);
+            r.Read(out smart_blobs);
+            r.Read(out energy_blobs);
+            r.Read(out thief);
+            r.Read(out pursuit);
+            r.Read(out lightcast);
+            r.Read(out death_roll);
+            r.Read(out flags);
+            r.Read(out pad0);
+            r.Read(out pad1);
+            r.Read(out pad2);
+            r.Read(out deathroll_sound);
+            r.Read(out glow);
+            r.Read(out behaviour);
+            r.Read(out aim);
+        }
         anim_states = new JointList[MAX_GUNS + 1, N_ANIM_STATES];
         for (int i = 0; i < MAX_GUNS + 1; i++)
             for (int j = 0; j < N_ANIM_STATES; j++)
@@ -754,9 +899,9 @@ public struct WeaponInfo
 {
     public const int NDL = 5;
     public sbyte render_type;
-    public sbyte model_num;
-    public sbyte model_num_inner;
     public sbyte persistent;
+    public int model_num;
+    public int model_num_inner;
 
     public sbyte flash_vclip;
     public short flash_sound;
@@ -775,6 +920,8 @@ public struct WeaponInfo
 
     public sbyte homing_flag;
     public sbyte dum1, dum2, dum3;
+    public byte speedvar, flags;
+    public sbyte flash, afterburner_size, children;
 
     public Fix energy_usage;
     public Fix fire_wait;
@@ -793,35 +940,73 @@ public struct WeaponInfo
     Fix light;
     Fix lifetime;
     Fix damage_radius;
-    BitmapIndex picture;
+    BitmapIndex picture, hires_picture;
+    Fix multi_damage_scale;
 
-    public void Read(BinaryReader r)
+    public void Read(BinaryReader r, Version version)
     {
         r.Read(out render_type);
-        r.Read(out model_num);
-        r.Read(out model_num_inner);
-        r.Read(out model_num_inner);
+        if (version == Version.D1)
+        {
+            model_num = r.ReadSByte();
+            model_num_inner = r.ReadSByte();
+            r.Read(out persistent);
+        }
+        else
+        {
+            r.Read(out persistent);
+            model_num = r.ReadInt16();
+            model_num_inner = r.ReadInt16();
+        }
 
         r.Read(out flash_vclip);
-        r.Read(out flash_sound);
+        if (version == Version.D1)
+            r.Read(out flash_sound);
         r.Read(out robot_hit_vclip);
-        r.Read(out robot_hit_sound);
+        if (version == Version.D1)
+            r.Read(out robot_hit_sound);
+        else
+            r.Read(out flash_sound);
 
         r.Read(out wall_hit_vclip);
-        r.Read(out wall_hit_sound);
+        if (version == Version.D1)
+            r.Read(out wall_hit_sound);
         r.Read(out fire_count);
+        if (version != Version.D1)
+            r.Read(out robot_hit_sound);
         r.Read(out ammo_usage);
 
         r.Read(out weapon_vclip);
+        if (version != Version.D1)
+            r.Read(out wall_hit_sound);
+
         r.Read(out destroyable);
         r.Read(out matter);
         r.Read(out bounce);
 
         r.Read(out homing_flag);
-        r.Read(out dum1); r.Read(out dum2); r.Read(out dum3);
+        if (version == Version.D1)
+        {
+            r.Read(out dum1); r.Read(out dum2); r.Read(out dum3);
+            speedvar = 128;
+            children = -1;
+        }
+        else
+        {
+            r.Read(out speedvar);
+            r.Read(out flags);
+            r.Read(out flash);
+            r.Read(out afterburner_size);
+            r.Read(out children);
+        }
 
         energy_usage.Read(r);
         fire_wait.Read(r);
+
+        if (version == Version.D2)
+            multi_damage_scale.Read(r);
+        else
+            multi_damage_scale = Fix.F1_0;
 
         bitmap.Read(r);
 
@@ -838,6 +1023,8 @@ public struct WeaponInfo
         lifetime.Read(r);
         damage_radius.Read(r);
         picture.Read(r);
+        if (version != Version.D1)
+            hires_picture.Read(r);
     }
 }
 
@@ -976,7 +1163,7 @@ public class ClassicData
     public int N_polygon_models;
     public PolyModel[] PolygonModels;
 
-    public BitmapIndex[] Gauges;
+    public BitmapIndex[] Gauges, Gauges_hires;
     public int[] DyingModelnums;
     public int[] DeadModelnums;
     public BitmapIndex[] ObjBitmaps;
@@ -998,56 +1185,73 @@ public class ClassicData
     public int exit_modelnum;
     public int destroyed_exit_modelnum;
 
-    public void Read(BinaryReader r)
+    public void Read(BinaryReader r, Version version)
     {
+        bool d1 = version == Version.D1;
         r.Read(out NumTextures);
-        (Textures = new BitmapIndex[MAX_TEXTURES]).Read(r);
-        (TmapInfo = new TmapInfo[MAX_TEXTURES]).Read(r);
-        (Sounds = new byte[MAX_SOUNDS]).Read(r);
-        (AltSounds = new byte[MAX_SOUNDS]).Read(r);
+        (Textures = new BitmapIndex[d1 ? MAX_TEXTURES : NumTextures]).Read(r);
+        (TmapInfo = new TmapInfo[d1 ? MAX_TEXTURES : NumTextures]).Read(r, version);
+        int NumSounds = d1 ? MAX_SOUNDS : r.ReadInt32();
+        Debug.Log("NumSounds " + NumSounds);
+        (Sounds = new byte[NumSounds]).Read(r);
+        (AltSounds = new byte[NumSounds]).Read(r);
         r.Read(out Num_vclips);
-        (Vclip = new Vclip[VCLIP_MAXNUM]).Read(r);
+        (Vclip = new Vclip[d1 ? VCLIP_MAXNUM : Num_vclips]).Read(r, version);
         r.Read(out Num_effects);
-        (Effects = new Eclip[MAX_EFFECTS]).Read(r);
+        (Effects = new Eclip[d1 ? MAX_EFFECTS : Num_effects]).Read(r, version);
         r.Read(out Num_wall_anims);
-        (WallAnims = new Wclip[MAX_WALL_ANIMS]).Read(r);
+        (WallAnims = new Wclip[d1 ? MAX_WALL_ANIMS : Num_wall_anims]).Read(r, version);
         r.Read(out N_robot_types);
-        (RobotInfo = new RobotInfo[MAX_ROBOT_TYPES]).Read(r);
+        (RobotInfo = new RobotInfo[d1 ? MAX_ROBOT_TYPES : N_robot_types]).Read(r, version);
         r.Read(out N_robot_joints);
-        (RobotJoints = new JointPos[MAX_ROBOT_JOINTS]).Read(r);
+        (RobotJoints = new JointPos[d1 ? MAX_ROBOT_JOINTS : N_robot_joints]).Read(r);
         r.Read(out N_weapon_types);
-        (WeaponInfo = new WeaponInfo[MAX_WEAPON_TYPES]).Read(r);
+        (WeaponInfo = new WeaponInfo[d1 ? MAX_WEAPON_TYPES : N_weapon_types]).Read(r, version);
         r.Read(out N_powerup_types);
-        (PowerupInfo = new PowerupInfo[MAX_POWERUP_TYPES]).Read(r);
+        (PowerupInfo = new PowerupInfo[d1 ? MAX_POWERUP_TYPES : N_powerup_types]).Read(r);
         r.Read(out N_polygon_models);
         (PolygonModels = new PolyModel[N_polygon_models]).Read(r);
         for (int i = 0; i < N_polygon_models; i++)
             PolygonModels[i].data = r.ReadBytes(PolygonModels[i].model_data_size);
-
-        (Gauges = new BitmapIndex[MAX_GAUGE_BMS]).Read(r);
-        (DyingModelnums = new int[MAX_POLYGON_MODELS]).Read(r);
-        (DeadModelnums = new int[MAX_POLYGON_MODELS]).Read(r);
-        (ObjBitmaps = new BitmapIndex[MAX_OBJ_BITMAPS]).Read(r);
-        (ObjBitmapPtrs = new ushort[MAX_OBJ_BITMAPS]).Read(r);
+        if (d1)
+            (Gauges = new BitmapIndex[MAX_GAUGE_BMS]).Read(r);
+        (DyingModelnums = new int[d1 ? MAX_POLYGON_MODELS : N_polygon_models]).Read(r);
+        (DeadModelnums = new int[d1 ? MAX_POLYGON_MODELS : N_polygon_models]).Read(r);
+        if (!d1)
+        {
+            int n = r.ReadInt32();
+            (Gauges = new BitmapIndex[n]).Read(r);
+            (Gauges_hires = new BitmapIndex[n]).Read(r);
+        }
+        int NumObjBitmaps = d1 ? MAX_OBJ_BITMAPS : r.ReadInt32();
+        (ObjBitmaps = new BitmapIndex[NumObjBitmaps]).Read(r);
+        (ObjBitmapPtrs = new ushort[NumObjBitmaps]).Read(r);
         PlayerShip.Read(r);
+
         r.Read(out Num_cockpits);
-        (CockpitBitmaps = new BitmapIndex[N_COCKPIT_BITMAPS]).Read(r);
+        (CockpitBitmaps = new BitmapIndex[d1 ? N_COCKPIT_BITMAPS : Num_cockpits]).Read(r);
 
-        (Sounds = new byte[MAX_SOUNDS]).Read(r);
-        (AltSounds = new byte[MAX_SOUNDS]).Read(r);
+        if (d1)
+        {
+            (Sounds = new byte[MAX_SOUNDS]).Read(r);
+            (AltSounds = new byte[MAX_SOUNDS]).Read(r);
 
-        r.Read(out Num_total_object_types);
-        (ObjType = new sbyte[MAX_OBJTYPE]).Read(r);
-        (ObjId = new sbyte[MAX_OBJTYPE]).Read(r);
-        (ObjStrength = new Fix[MAX_OBJTYPE]).Read(r);
+            r.Read(out Num_total_object_types);
+            (ObjType = new sbyte[MAX_OBJTYPE]).Read(r);
+            (ObjId = new sbyte[MAX_OBJTYPE]).Read(r);
+            (ObjStrength = new Fix[MAX_OBJTYPE]).Read(r);
+       }
 
         r.Read(out First_multi_bitmap_num);
 
-        r.Read(out N_controlcen_guns);
-        (ControlcenGunPoints = new vms_vector[MAX_CONTROLCEN_GUNS]).Read(r);
-        (ControlcenGunDirs = new vms_vector[MAX_CONTROLCEN_GUNS]).Read(r);
-        r.Read(out exit_modelnum);
-        r.Read(out destroyed_exit_modelnum);
+        if (d1)
+        {
+            r.Read(out N_controlcen_guns);
+            (ControlcenGunPoints = new vms_vector[MAX_CONTROLCEN_GUNS]).Read(r);
+            (ControlcenGunDirs = new vms_vector[MAX_CONTROLCEN_GUNS]).Read(r);
+            r.Read(out exit_modelnum);
+            r.Read(out destroyed_exit_modelnum);
+        }
     }
 }
 
@@ -1065,6 +1269,185 @@ class ClassicLoader
         for (int i = 0; i < 3 * 256; i++)
             ret[i] = VgaPalExt(src[i]);
         return ret;
+    }
+
+    static void DumpBitmapList(Pig pig, byte[] pal, string outdir, List<PigBitmap> texs)
+    {
+
+        //string s = hog.itemString("descent.sng");
+        //Debug.WriteLine(s);
+        /*
+        int w = texs.First().width, h = texs.Sum(x => x.height);
+        Rectangle rect = new Rectangle(0, 0, w, h);
+        PixelFormat fmt = PixelFormat.Format32bppArgb;
+
+        byte[] img = new byte[w * h * 4];
+        int dstOfs = 0;
+
+        foreach (PigBitmap bmp in texs)
+        {
+            byte[] img8 = pig.GetBitmap(bmp);
+            int srcOfs = 0;
+            int th = bmp.height;
+            Debug.Assert(bmp.width == w);
+            for (int y = 0; y < th; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    int i = img8[srcOfs++] * 3;
+                    img[dstOfs++] = pal[i + 2];
+                    img[dstOfs++] = pal[i + 1];
+                    img[dstOfs++] = pal[i];
+                    img[dstOfs++] = (i >= 254 * 3 ? (byte)0 : (byte)255);
+                }
+        }
+
+        using (Bitmap b = new Bitmap(w, h, fmt))
+        {
+            BitmapData d = b.LockBits(rect, ImageLockMode.ReadWrite, fmt);
+            //Debug.WriteLine(d.Stride);
+            //Debug.WriteLine(img[0]);
+            //Debug.WriteLine(img[4]);
+            Marshal.Copy(img, 0, d.Scan0, img.Length);
+            b.UnlockBits(d);
+            string fn = String.Format("{0}\\d1_{1}.png", outdir, texs.First().name);
+            Debug.WriteLine(fn);
+            b.Save(fn, ImageFormat.Png);
+        }
+        */
+    }
+
+    /*
+    static void DumpTextures(Pig pig, byte[] pal, string outdir)
+    {
+        var seen = new HashSet<int>();
+        foreach (int idx in pig.lvlTexIdx)
+            seen.Add(idx);
+        var idxs = seen.ToArray();
+        Array.Sort(idxs);
+
+        foreach (var idx in idxs)
+        {
+            if (idx == 0)
+                continue;
+            var bmp = pig.bitmaps[idx - 1];
+            //Debug.WriteLine(String.Format("{0} {1}x{2} {3} {4}", bmp.name, bmp.width, bmp.height, bmp.frame & 0xff, bmp.flags));
+            if ((bmp.frame & 0x9f) != 0)
+                continue;
+            DumpBitmapList(pig, pal, outdir, new List<PigBitmap> { bmp });
+        }
+    }
+    */
+
+    static void DumpSounds(Pig pig, string outdir)
+    {
+        foreach (var sound in pig.sounds)
+        {
+            var data = new byte[44 + sound.length];
+            Array.Copy(new byte[] { (byte)'R', (byte)'I', (byte)'F', (byte)'F' }, 0, data, 0, 4);
+            Bits.SetInt32(data, 4, sound.length + 36);
+            Array.Copy(new byte[] { (byte)'W', (byte)'A', (byte)'V', (byte)'E' }, 0, data, 8, 4);
+            Array.Copy(new byte[] { (byte)'f', (byte)'m', (byte)'t', (byte)' ' }, 0, data, 12, 4);
+            Bits.SetInt32(data, 16, 16); // fmt size
+            Bits.SetInt16(data, 20, 1); // pcm
+            Bits.SetInt16(data, 22, 1); // mono
+            Bits.SetInt32(data, 24, 11025); // sample rate
+            Bits.SetInt32(data, 28, 11025); // byte rate
+            Bits.SetInt16(data, 32, 1); // align
+            Bits.SetInt16(data, 34, 8); // bits per sample
+            Array.Copy(new byte[] { (byte)'d', (byte)'a', (byte)'t', (byte)'a' }, 0, data, 36, 4);
+            Bits.SetInt32(data, 40, sound.length);
+            pig.CopySound(sound, data, 44);
+            using (var f = new FileStream(outdir + Path.DirectorySeparatorChar + sound.name + ".wav", FileMode.CreateNew))
+                f.Write(data, 0, data.Length);
+        }
+    }
+
+
+    static void Main(string[] args)
+    {
+
+        //Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
+        //Thread.CurrentThread.CurrentUICulture = CultureInfo.InvariantCulture;
+
+#if false
+        string dir = "c:\\games\\d1x-rebirth\\data";
+        string outdir = "c:\\temp\\d1tex";
+        Hog hog = new Hog(dir + "\\descent.hog");
+        byte[] vgapal = hog.ItemData("palette.256");
+        byte[] pal = PalConv(vgapal);
+
+        /*
+        if (args.Length == 0) {
+            Console.WriteLine("Missing pig file argument");
+            return;
+        }
+
+        var pigFile = args[0];
+        if (!File.Exists(pigFile)) {
+            Console.WriteLine(String.Format("Pig file {0} does not exist", pigFile));
+            return;
+        }
+        */
+        var pigFile = dir + "\\descent.pig";
+
+        Pig pig;
+        try
+        {
+            pig = new Pig(pigFile);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(String.Format("Cannot read pig file {0}: {1}", pigFile, ex.Message));
+            return;
+        }
+
+        TableData d;
+        pig.ReadTableData(out d);
+        /*
+        Debug.WriteLine(d.destroyed_exit_modelnum);
+        Debug.WriteLine(d.NumTextures);
+        Debug.WriteLine(d.N_polygon_models);
+        Debug.WriteLine(d.N_robot_types);
+        Debug.WriteLine(d.N_robot_joints);
+        */
+
+        int mi = 0;
+        foreach (var model in d.PolygonModels)
+        {
+            var r = new BinaryReader(new MemoryStream(model.data));
+            //var x = r.ReadUInt32();
+            //Debug.WriteLine("1: " + x.ToString("X"));
+            //break;
+            Debug.WriteLine("--- model " + mi);
+            DumpModelData(r);
+            mi++;
+            if (mi == 5)
+                break;
+        }
+
+        //DumpBitmapList(pig, pal, outdir, pig.bitmaps.Where(bmp => bmp.name == "rbot066").ToList());
+        //DumpTextures(pig, pal, outdir);
+#else
+        var pigFile = @"c:\temp\d1sw14\descent.pig";
+        var pig = new Pig(pigFile);
+        DumpSounds(pig, @"c:\temp\d1sndsw");
+        Console.WriteLine(String.Format("Wrote {0} files to current directory.", pig.soundCount));
+#endif
+
+        /*
+        var texs = new List<PigBitmap>();
+        string name = "eye01";
+        foreach (var bmp in pig.bitmaps) {
+            Debug.WriteLine(bmp.name);
+            if (bmp.name.Equals(name))
+                texs.Add(bmp);
+        }
+
+        DumpBitmapList(pig, pal, outdir, texs);
+        */
+
+
+        //Level lvl = new Level(hog.ItemData("level01.rdl"));
     }
 }
 }

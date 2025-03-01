@@ -23,17 +23,17 @@ namespace Classic
         static Shader shader;
         public static List<GameObject> ClassicRobots;
         static Dictionary<int, Material> ClassicMats = new Dictionary<int, Material>();
+        static Dictionary<int, AudioClip> ClassicClips = new Dictionary<int, AudioClip>();
 
-        public static bool ClassicInit()
+        static void MyInit()
         {
             if (ClassicData != null)
-                return true;
-            string dir = Environment.GetEnvironmentVariable("OLMODDIR");
-            string hogFile = Path.Combine(dir, "descent.hog"), pigFile = Path.Combine(dir, "descent.pig");
-            if (!File.Exists(hogFile) || !File.Exists(pigFile))
-                return false;
+                return;
+            string dir = "c:\\games\\d1x-rebirth\\data";
+            //var hogFile = Path.Combine(dir, "descent.hog");
+            var hogFile = @"c:\games\descent2\descent2.hog";
             Hog hog = new Hog(hogFile);
-            byte[] vgapal = hog.ItemData("palette.256");
+            byte[] vgapal = hog.ItemData("groupa.256");
             pal = ClassicLoader.VgaPalConv(vgapal);
 
             pal32 = new Color32[256];
@@ -44,16 +44,17 @@ namespace Classic
             for (int i = 0; i < 256; i++)
                 palu[i] = ((uint)pal[i * 3] << 0) | ((uint)pal[i * 3 + 1] << 8) | ((uint)pal[i * 3 + 2] << 16) | (255u << 24);
 
+            var pigFile = Path.Combine(dir, "descent.pig");
+            pigFile = @"c:\\games\\descent2\\groupa.pig";
+
             pig = new Pig(pigFile);
+
+            pig.ReadD2Sound(@"c:\\games\descent2\\descent2.s11");
 
             pig.ReadTableData(out ClassicData);
 
             shader = Shader.Find("Standard");
             //shader = Shader.Find("Diffuse");
-
-            //Debug.Log("robot0 see=" + ClassicData.RobotInfo[0].see_sound);
-
-            return true;
         }
 
         enum PolyOp
@@ -212,7 +213,7 @@ namespace Classic
                         break;
                     case PolyOp.GLOW:
                         i1 = r.ReadInt16();
-                        Debug.Log(i1);
+                        //Debug.Log(i1.ToString());
                         break;
                     default:
                         throw new Exception();
@@ -258,12 +259,17 @@ namespace Classic
             return mat;
         }
 
+        public static bool ClassicInit()
+        {
+        	MyInit();
+        	return ClassicData != null;
+        }
+
         static void CreateRobotModels()
         {
             if (ClassicRobots != null)
                 return;
-            if (!ClassicInit())
-                throw new Exception("Missing classic data");
+            MyInit();
             ClassicRobots = new List<GameObject>();
             for (int ri = 0; ri < ClassicData.N_robot_types; ri++)
             {
@@ -312,5 +318,67 @@ namespace Classic
             CreateRobotModels();
             return UnityEngine.Object.Instantiate<GameObject>(ClassicRobots[n]);
         }
+
+        public static bool IsClassicBot(Robot robot, out int botNum)
+        {
+            botNum = -1;
+            return robot.gameObject.name.StartsWith("entity_enemy_classic_") && int.TryParse(robot.gameObject.name.Substring(21), out botNum);
+        }
+
+        public static AudioClip GetClip(int sndnum)
+        {
+            int sndidx;
+            if (ClassicData == null || sndnum < 0 || sndnum >= ClassicData.Sounds.Length || (sndidx = ClassicData.Sounds[sndnum]) == 255)
+                return AudioClip.Create("", 0, 1, 44100, false);
+            AudioClip clip;
+            if (ClassicClips.TryGetValue(sndidx, out clip))
+                return clip;
+            var sound = pig.sounds[sndidx];
+            int p = pig.soundDataOfs + sound.offset, len = sound.length;
+            byte[] buf = pig.soundData;
+
+            clip = AudioClip.Create("classic_" + sndidx, len, 1, 11025, false);
+            float[] fdata = new float[len];
+            for (int i = 0; i < len; i++)
+                fdata[i] = (buf[p + i] - 128) / 128f;
+            clip.SetData(fdata, 0);
+            ClassicClips.Add(sndidx, clip);
+            return clip;
+        }
+
+/*
+        public static int PlaySound(int sndnum, Vector3 pos3d, float vol, float pitch, float offset, UnityAudio.SoundType st, bool loop = false, float amt_3d = 1f)
+        {
+            var audio = Overload.GameManager.m_audio;
+            int audioSlot = audio.FindNextOpenAudioSlot();
+            if (audioSlot < 0)
+            {
+                if (audio.m_debug_sounds)
+                {
+                    Debug.Log("NO FREE SOUND SLOTS!");
+                }
+                return -1;
+            }
+            audio.m_a_object[audioSlot].transform.parent = null;
+            audio.m_a_object[audioSlot].transform.localPosition = pos3d;
+            var asrc = audio.m_a_source[audioSlot];
+            asrc.enabled = true;
+            asrc.clip = GetClip(sndnum);
+            asrc.time = Mathf.Clamp(offset, 0f, asrc.clip.length);
+            asrc.volume = vol;
+            asrc.spatialBlend = ((st != 0) ? 0f : amt_3d);
+            asrc.loop = loop;
+            asrc.maxDistance = ((!Overload.GameplayManager.IsMultiplayer) ? 250f : 70f);
+            audio.m_a_original_pitch[audioSlot] = 1f + pitch;
+            asrc.pitch = audio.m_a_original_pitch[audioSlot];
+            asrc.outputAudioMixerGroup = audio.m_mixer_groups[(int)audio.m_default_audio_group];
+            asrc.bypassReverbZones = (st == UnityAudio.SoundType.ST_2D);
+            asrc.reverbZoneMix = ((st != UnityAudio.SoundType.ST_2D) ? 1f : UnityEngine.Random.Range(0f, 0.002f));
+            audio.m_a_object[audioSlot].SetActive(true);
+            asrc.Play();
+            return audioSlot;
+        }
+*/
+
     }
 }
