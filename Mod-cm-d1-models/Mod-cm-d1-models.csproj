@@ -7,8 +7,8 @@
     <ProjectGuid>{0D0FF0A7-23A3-47DB-B411-3B34CD514F7C}</ProjectGuid>
     <OutputType>Library</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>mod_cm_d1_models</RootNamespace>
-    <AssemblyName>mod-cm-d1-models</AssemblyName>
+    <RootNamespace>Mod_CM_D1_Models</RootNamespace>
+    <AssemblyName>Mod-cm-d1-models</AssemblyName>
     <TargetFrameworkVersion>v3.5</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <Deterministic>true</Deterministic>
@@ -53,7 +53,7 @@
     <Compile Include="ClassicLoader.cs" />
     <Compile Include="ClassicModel.cs" />
     <Compile Include="GetClassic.cs" />
-    <Compile Include="mod-cm-d1-models.cs" />
+    <Compile Include="Mod-cm-d1-models.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

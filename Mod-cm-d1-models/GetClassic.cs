@@ -7,15 +7,21 @@ using UnityEngine;
 
 namespace Classic
 {
+    public class ClassicRobotInfo : MonoBehaviour
+    {
+        public int m_robot_type;
+        public RobotInfo m_robot_info;
+    }
+
     public static class GetClassic
     {
-        static ClassicData ClassicData;
-        static Pig pig;
+        public static ClassicData ClassicData;
+        public static Pig pig;
         static byte[] pal;
         static Color32[] pal32;
         static uint[] palu;
         static Shader shader;
-        static List<GameObject> ClassicRobots;
+        public static List<GameObject> ClassicRobots;
         static Dictionary<int, Material> ClassicMats = new Dictionary<int, Material>();
 
         public static bool ClassicInit()
@@ -44,6 +50,9 @@ namespace Classic
 
             shader = Shader.Find("Standard");
             //shader = Shader.Find("Diffuse");
+
+            //Debug.Log("robot0 see=" + ClassicData.RobotInfo[0].see_sound);
+
             return true;
         }
 
@@ -286,9 +295,14 @@ namespace Classic
                 for (int i = 0; i < model.n_textures; i++)
                     mats[i] = MkMat(ClassicData.ObjBitmaps[ClassicData.ObjBitmapPtrs[model.first_texture + i]].index);
                 rend.materials = mats;
+                var cri = go.AddComponent<ClassicRobotInfo>();
+                cri.m_robot_type = ri;
+                cri.m_robot_info = ClassicData.RobotInfo[ri];
                 UnityEngine.Object.DontDestroyOnLoad(go);
                 ClassicRobots.Add(go);
             }
+            Debug.Log("createmodels robot0 see=" + ClassicData.RobotInfo[0].see_sound);
+            Debug.Log("createmodels robot0 component see=" + ClassicRobots[0].GetComponent<ClassicRobotInfo>().m_robot_info.see_sound);
         }
 
         public static int NumRobots { get { CreateRobotModels(); return ClassicData.N_robot_types; } }

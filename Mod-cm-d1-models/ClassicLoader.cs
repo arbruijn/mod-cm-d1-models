@@ -119,7 +119,7 @@ class Hog
 }
 
 [Flags]
-enum PigFlag
+public enum PigFlag
 {
     Transparent = 1,
     SuperTransparent = 2,
@@ -129,7 +129,7 @@ enum PigFlag
     RLEBig = 32
 }
 
-class PigBitmap
+public class PigBitmap
 {
     public PigBitmap(byte[] data, int ofs)
     {
@@ -151,7 +151,7 @@ class PigBitmap
     public int ofs;
 }
 
-class PigSound
+public class PigSound
 {
     public PigSound(byte[] data, int ofs)
     {
@@ -293,7 +293,7 @@ static class Ext
     }
 }
 
-class Pig
+public class Pig
 {
     public Pig(string filename)
     {
@@ -728,9 +728,9 @@ public struct RobotInfo
         r.Read(out cloak_type);
         r.Read(out attack_type);
         r.Read(out boss_flag);
-        r.Read(out see_sound);
-        r.Read(out attack_sound);
-        r.Read(out claw_sound);
+        see_sound = r.ReadByte();
+        attack_sound = r.ReadByte();
+        claw_sound = r.ReadByte();
         anim_states = new JointList[MAX_GUNS + 1, N_ANIM_STATES];
         for (int i = 0; i < MAX_GUNS + 1; i++)
             for (int j = 0; j < N_ANIM_STATES; j++)
